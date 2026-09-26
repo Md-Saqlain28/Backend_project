@@ -6,3 +6,5 @@ const asyncHandler = () => {
 
 
 }
+
+export { asyncHandler }
