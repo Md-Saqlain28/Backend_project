@@ -4,6 +4,26 @@ import { User } from "../models/user.models.js"
 import {deleteFromCloudinary, uploadOnCloudinary} from "../utils/cloudinary.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 
+
+const generateAccessAndRefreshToken = async (userId) => {
+    try{
+        const user = await User.findById(userId)
+
+        if(!user){
+        throw new ApiError(404, "User not found")
+    }
+
+        const accessToken = await user.generateAccessToken()
+        const refreshToken = await user.generateRefreshToken()
+
+        user.refreshToken = refreshToken
+        await user.save({validateBeforeSave: false})
+        return {accessToken, refreshToken}
+    }catch(error){
+        throw new ApiError(500, "Something went wrong while generating access and refresh token")
+    }
+}
+
 const registerUser = asyncHandler(async (req, res) => {
     const {fullname, email, username, password} = req.body
 
@@ -95,5 +115,64 @@ const registerUser = asyncHandler(async (req, res) => {
 })
 
 
+const loginUser = asyncHandler(async (req, res) => {
+    // get data from the body
+    const {email, username, password} = req.body
 
-export { registerUser }
+    //validation
+    if(!email){
+        throw new ApiError(400, "Email is required")
+    }
+    if(!password){
+        throw new ApiError(400, "Password is required")
+    }
+    if(!username){
+        throw new ApiError(400, "Username is required")
+    }
+
+    const user = await User.findOne({
+        $or: [{email}, {username}]
+    })
+
+    if(!user){
+        throw new ApiError(404, "User not found")
+    }
+
+    //validate password
+    const isPasswordValid = await user.isPasswordCorrect(password)
+
+    if(!isPasswordValid){
+        throw new ApiError(401, "Invalid user credentials")
+    }
+
+    const {accessToken, refreshToken} = await generateAccessAndRefreshToken(user._id)
+
+
+    const loggedInUser = await User.findById(user._id)
+        .select("-password -refreshToken")
+
+    if(!loggedInUser){
+        throw new ApiError(500, "Something went wrong while logging in the user")
+    }
+
+    const options = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+    }
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json(new ApiResponse(
+            200,
+            {user: loggedInUser, accessToken, refreshToken},
+            "user logged in successfully"
+        ))
+    
+
+
+})
+
+
+export { registerUser, loginUser }
